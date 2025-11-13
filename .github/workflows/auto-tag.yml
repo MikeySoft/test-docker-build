@@ -1,0 +1,134 @@
+name: Auto Tag Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Docker Images
+      - Snapshot Binaries
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-tag-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  tag-and-release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check workflow prerequisites
+        id: guard
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const required = ["CI", "Docker Images", "Snapshot Binaries"];
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.payload.workflow_run.head_sha;
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner, repo, per_page: 100, head_sha: sha, status: "completed" }
+            );
+
+            const missing = required.filter(
+              (name) =>
+                !runs.find(
+                  (run) =>
+                    run.name === name &&
+                    run.head_sha === sha &&
+                    run.conclusion === "success"
+                )
+            );
+
+            if (missing.length > 0) {
+              core.notice(`Waiting on workflows: ${missing.join(", ")}`);
+              return { proceed: "false" };
+            }
+
+            return { proceed: "true" };
+
+      - name: Skip until all workflows succeed
+        if: ${{ steps.guard.outputs.proceed != 'true' }}
+        run: |
+          echo "Prerequisite workflows not finished successfully yet. Skipping tag creation."
+          exit 0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Determine release version
+        id: version
+        run: |
+          SHOULD_RELEASE="false"
+          VERSION=""
+
+          if [[ -f VERSION ]]; then
+            VERSION="$(tr -d '[:space:]' < VERSION)"
+
+            if [[ -z "$VERSION" ]]; then
+              echo "Version file is empty."
+            elif [[ "$VERSION" == *-* ]]; then
+              echo "Version '$VERSION' is marked as prerelease/dev; skipping."
+            else
+              TAG="v${VERSION}"
+
+              if git rev-parse "$TAG" >/dev/null 2>&1; then
+                echo "Tag $TAG already exists; skipping."
+              else
+                LAST_TAG="$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || echo '')"
+
+                if [[ -n "$LAST_TAG" ]]; then
+                  LAST_VERSION="${LAST_TAG#v}"
+                  HIGHEST="$(printf '%s\n%s\n' "$LAST_VERSION" "$VERSION" | sort -V | tail -n1)"
+
+                  if [[ "$HIGHEST" != "$VERSION" ]]; then
+                    echo "Version $VERSION is not greater than $LAST_VERSION; skipping."
+                  else
+                    SHOULD_RELEASE="true"
+                  fi
+                else
+                  SHOULD_RELEASE="true"
+                fi
+              fi
+            fi
+          else
+            echo "VERSION file not found; skipping."
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: No release required
+        if: ${{ steps.version.outputs.should_release != 'true' }}
+        run: |
+          echo "No release triggered for this commit."
+          exit 0
+
+      - name: Create and push tag
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+          PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if [[ -z "${TAG}" ]]; then
+            echo "Tag name missing; aborting."
+            exit 1
+          fi
+
+          if [[ -z "${PAT}" ]]; then
+            echo "RELEASE_PAT secret is not configured. Unable to push tag."
+            exit 1
+          fi
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push "https://${PAT}@github.com/${{ github.repository }}.git" "$TAG"

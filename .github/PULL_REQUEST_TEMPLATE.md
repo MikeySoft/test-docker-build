@@ -15,4 +15,3 @@
 - [ ] Added/updated tests
 - [ ] Considered backward compatibility and migrations
 - [ ] No sensitive info included (logs, secrets, etc.)
-
