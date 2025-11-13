@@ -1,6 +1,8 @@
 module github.com/mikeysoft/flotilla
 
-go 1.21
+go 1.24.0
+
+toolchain go1.24.1
 
 require (
 	github.com/docker/docker v24.0.7+incompatible
@@ -72,5 +74,3 @@ require (
 	google.golang.org/protobuf v1.31.0 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
 )
-
-replace github.com/rogpeppe/go-internal => github.com/rogpeppe/go-internal v1.12.0

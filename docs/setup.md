@@ -9,7 +9,7 @@ This guide walks through deploying Flotilla for the first time in a production (
 | Component | Requirement |
 |-----------|-------------|
 | Operating System | 64-bit Linux (recommended), macOS, or Windows Server for lab environments |
-| Runtime | Docker 24+ (for container deployment) or Go 1.21+ for native binaries |
+| Runtime | Docker 24+ (for container deployment) or Go 1.24+ for native binaries |
 | Database | PostgreSQL 15+ with a dedicated database/user |
 | TLS | Valid certificate/chain for the management server (Let's Encrypt or corporate CA) |
 | Network | Outbound TCP 443/8080 from agents to server; inbound 443/8080 for UI/API access |

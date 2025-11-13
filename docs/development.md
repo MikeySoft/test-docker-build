@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.24+
 - Node.js 20+
 - Docker 24+
 - PostgreSQL 15+

@@ -17,7 +17,7 @@ We are committed to a welcoming and harassment-free experience for everyone. By 
 ## Development Workflow
 
 1. **Fork** the repository and create a topic branch from `main`.
-2. **Install prerequisites** (Go 1.21+, Node.js 20+, Docker 24+, PostgreSQL 15+).
+2. **Install prerequisites** (Go 1.24+, Node.js 20+, Docker 24+, PostgreSQL 15+).
 3. **Run setup scripts** outlined in `docs/development.md`.
 4. **Make your changes**, keeping commits focused and logical.
 5. **Run tests and linters** (see `Makefile` targets and CI workflows).
