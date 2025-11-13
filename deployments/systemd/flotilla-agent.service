@@ -1,0 +1,21 @@
+[Unit]
+Description=Flotilla Docker Management Agent
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agent -config /etc/flotilla/agent.yaml
+Restart=always
+RestartSec=5
+User=root
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
+# Hardening options (adjust as needed)
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

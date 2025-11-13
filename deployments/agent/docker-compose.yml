@@ -1,0 +1,62 @@
+services:
+  flotilla-agent:
+    image: flotilla/agent:dev
+    build:
+      context: ${FLOTILLA_REPO_DIR:-../../}
+      dockerfile: deployments/agent/Dockerfile
+    container_name: flotilla-agent
+    restart: unless-stopped
+    privileged: true # required for metrics collection
+    pid: host # required for metrics collection
+    environment:
+      # Host filesystem access for metrics collection
+      - HOST_PROC=/proc
+      - HOST_SYS=/sys
+      - HOST_ETC=/etc
+      - HOST_ROOT_PATH=/host
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+
+      # Server connection
+      - SERVER_ADDRESS=${SERVER_ADDRESS:-localhost}
+      - SERVER_PORT=${SERVER_PORT:-8080}
+      - SERVER_USE_TLS=${SERVER_USE_TLS:-true}
+      # - TLS_CERT_FILE=../../tls/cert.pem
+      # - TLS_KEY_FILE=../../tls/key.pem
+      - SKIP_TLS_VERIFY=true
+      - API_KEY=${API_KEY:-}
+
+      # Agent identity
+      - AGENT_ID=${AGENT_ID:-}
+      - AGENT_NAME=${AGENT_NAME:-}
+
+      # Docker
+      - DOCKER_SOCKET=${DOCKER_SOCKET:-/var/run/docker.sock}
+
+      # Connection/heartbeat
+      - AGENT_HEARTBEAT_INTERVAL=${AGENT_HEARTBEAT_INTERVAL:-30s}
+      - AGENT_RECONNECT_INTERVAL=${AGENT_RECONNECT_INTERVAL:-5s}
+      - AGENT_MAX_RECONNECT_ATTEMPTS=${AGENT_MAX_RECONNECT_ATTEMPTS:-10}
+
+      # Metrics
+      - METRICS_ENABLED=${METRICS_ENABLED:-true}
+      - METRICS_COLLECTION_INTERVAL=${METRICS_COLLECTION_INTERVAL:-30s}
+      - METRICS_COLLECT_HOST_STATS=${METRICS_COLLECT_HOST_STATS:-true}
+      - METRICS_COLLECT_NETWORK=${METRICS_COLLECT_NETWORK:-true}
+
+    volumes:
+      - /var/run/docker.sock:${DOCKER_SOCKET:-/var/run/docker.sock}
+      - flotilla-agent-data:/var/lib/flotilla
+      # Host filesystem access for metrics collection
+      - /proc:/proc
+      - /sys:/sys:ro
+      - /etc:/etc:ro
+      - /:/host:ro
+
+    # If the server is on a different host/port, ensure reachable networking
+    network_mode: host
+
+volumes:
+  flotilla-agent-data:

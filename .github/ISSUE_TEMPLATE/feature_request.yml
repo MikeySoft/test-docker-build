@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest an idea or improvement for Flotilla
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for sharing ideas that can make Flotilla even better!
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: In one sentence, what problem are you trying to solve?
+      placeholder: Describe the opportunity
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this valuable? Who benefits?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Outline your idea or desired experience.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you explored other approaches?
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add links, diagrams, or prototypes if helpful.
+

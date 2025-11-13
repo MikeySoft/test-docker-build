@@ -1,0 +1,24 @@
+[Unit]
+Description=Flotilla Management Server
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/flotilla/server.env
+
+[Service]
+Type=simple
+User=flotilla
+Group=flotilla
+EnvironmentFile=/etc/flotilla/server.env
+WorkingDirectory=/var/lib/flotilla
+ExecStart=/usr/local/bin/flotilla-server
+Restart=always
+RestartSec=5
+RuntimeDirectory=flotilla
+RuntimeDirectoryMode=0750
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target
+
