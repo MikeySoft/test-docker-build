@@ -3,6 +3,7 @@ name: Docker Images
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -37,6 +38,13 @@ jobs:
           PUBLISH: "true"
           EDGE_TAG: "true"
         run: |
-          VERSION="sha-${GITHUB_SHA::7}" \
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            VERSION="pr-${GITHUB_HEAD_REF}-${GITHUB_SHA::7}"
+            export PUSH_IMAGES="false"
+          else
+            VERSION="sha-${GITHUB_SHA::7}"
+            export PUSH_IMAGES="true"
+          fi
           PLATFORMS="${PLATFORMS}" \
+          VERSION="${VERSION}" \
           make docker-release
