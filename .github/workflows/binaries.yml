@@ -1,0 +1,36 @@
+name: Snapshot Binaries
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.21.x"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+          cache: true
+
+      - name: Package Binaries
+        run: |
+          VERSION="sha-${GITHUB_SHA::7}" make package-binaries
+
+      - name: Upload Snapshot Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flotilla-snapshot-${{ github.sha }}
+          path: dist/release/**
