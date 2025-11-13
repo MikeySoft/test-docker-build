@@ -3,9 +3,7 @@ name: Auto Tag Release
 on:
   workflow_run:
     workflows:
-      - CI
       - Docker Images
-      - Snapshot Binaries
     types:
       - completed
 
@@ -18,7 +16,8 @@ concurrency:
 
 jobs:
   tag-and-release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check workflow prerequisites
@@ -48,10 +47,12 @@ jobs:
 
             if (missing.length > 0) {
               core.notice(`Waiting on workflows: ${missing.join(", ")}`);
-              return { proceed: "false" };
+              core.setOutput('proceed', 'false');
+              return;
             }
 
-            return { proceed: "true" };
+            core.setOutput('proceed', 'true');
+            return;
 
       - name: Skip until all workflows succeed
         if: ${{ steps.guard.outputs.proceed != 'true' }}
@@ -102,6 +103,17 @@ jobs:
             fi
           else
             echo "VERSION file not found; skipping."
+          fi
+
+          if [[ "$SHOULD_RELEASE" == "true" ]]; then
+            TAG="v${VERSION}"
+            if ! git fetch --tags --force >/dev/null 2>&1; then
+              echo "Warning: git fetch --tags --force failed. Tag information may be outdated." >&2
+            fi
+            if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+              echo "Remote already has tag $TAG; skipping."
+              SHOULD_RELEASE="false"
+            fi
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
