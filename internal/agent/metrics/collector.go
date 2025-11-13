@@ -446,7 +446,7 @@ func (c *Collector) resolveCgroupPath(pid int) string {
 		hostProc = "/host/proc"
 	}
 	cgFile := fmt.Sprintf("%s/%d/cgroup", hostProc, pid)
-	data, err := os.ReadFile(cgFile)
+	data, err := os.ReadFile(cgFile) // #nosec G304 -- cgroup path constructed from /proc with sanitized pid
 	if err != nil {
 		return ""
 	}
@@ -473,7 +473,7 @@ func (c *Collector) readIoStat(cgroupPath string) (readBytes uint64, writeBytes 
 		hostCgroup = "/host/sys/fs/cgroup"
 	}
 	ioStatPath := fmt.Sprintf("%s%s/io.stat", hostCgroup, cgroupPath)
-	ioData, err := os.ReadFile(ioStatPath)
+	ioData, err := os.ReadFile(ioStatPath) // #nosec G304 -- path constrained to host cgroup directories
 	if err != nil {
 		return 0, 0
 	}

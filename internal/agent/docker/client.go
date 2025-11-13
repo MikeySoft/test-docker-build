@@ -377,7 +377,9 @@ func (c *Client) RunContainer(ctx context.Context, config *container.Config, hos
 	err = c.StartContainer(ctx, createResponse.ID)
 	if err != nil {
 		// If start fails, clean up the created container
-		c.RemoveContainer(ctx, createResponse.ID, true)
+		if rmErr := c.RemoveContainer(ctx, createResponse.ID, true); rmErr != nil {
+			logrus.WithError(rmErr).Warnf("Failed to remove container %s after start error", createResponse.ID)
+		}
 		return nil, err
 	}
 

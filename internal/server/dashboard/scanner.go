@@ -653,12 +653,21 @@ func intFromAny(value interface{}) int {
 	case int:
 		return v
 	case int64:
+		if v > int64(math.MaxInt) {
+			return math.MaxInt
+		}
+		if v < int64(math.MinInt) {
+			return math.MinInt
+		}
 		return int(v)
 	case float64:
 		return int(v)
 	case float32:
 		return int(v)
 	case uint64:
+		if v > uint64(math.MaxInt) {
+			return math.MaxInt
+		}
 		return int(v)
 	case uint32:
 		return int(v)

@@ -8,10 +8,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/mikeysoft/flotilla/internal/server/auth"
 	"github.com/mikeysoft/flotilla/internal/server/database"
+	"github.com/sirupsen/logrus"
 )
 
 const (
-	csrfTokenHeader = "X-CSRF-Token"
+	csrfTokenHeader = "X-CSRF-Token" // #nosec G101 -- header name constant, not a credential
 )
 
 type AuthHandler struct{}
@@ -65,10 +66,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	database.DB.Model(&u).Update("last_login_at", &now)
 
 	// Audit log successful login
-	auth.LogAuditEvent(&u.ID, "user_login", "user", &u.ID, map[string]interface{}{
+	if err := auth.LogAuditEvent(&u.ID, "user_login", "user", &u.ID, map[string]interface{}{
 		"username":   u.Username,
 		"ip_address": c.ClientIP(),
-	}, c.ClientIP(), c.GetHeader("User-Agent"))
+	}, c.ClientIP(), c.GetHeader("User-Agent")); err != nil {
+		logrus.WithError(err).Warn("Failed to record user_login audit event")
+	}
 
 	// Issue access and refresh
 	jti := uuid.New().String()

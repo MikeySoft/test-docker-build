@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -37,13 +38,19 @@ func (c *AgentConnection) readPump() {
 			logrus.Errorf("Panic in agent readPump for agent %s: %v", c.ID, r)
 		}
 		c.Hub.unregisterAgent <- c
-		c.Conn.Close()
+		if err := c.Conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+			logrus.WithError(err).Debugf("Failed to close agent connection %s", c.ID)
+		}
 	}()
 
 	c.Conn.SetReadLimit(maxMessageSize)
-	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+	if err := c.Conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		logrus.WithError(err).Warnf("Failed to set read deadline for agent %s", c.ID)
+	}
 	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+		if err := c.Conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			logrus.WithError(err).Warnf("Failed to extend read deadline for agent %s", c.ID)
+		}
 		c.LastSeen = time.Now()
 		return nil
 	})
@@ -92,15 +99,22 @@ func (c *AgentConnection) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.Conn.Close()
+		if err := c.Conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+			logrus.WithError(err).Debugf("Failed to close agent connection %s", c.ID)
+		}
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				logrus.WithError(err).Warnf("Failed to set write deadline for agent %s", c.ID)
+				return
+			}
 			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+					logrus.WithError(err).Debugf("Failed to send close message to agent %s", c.ID)
+				}
 				return
 			}
 
@@ -108,7 +122,11 @@ func (c *AgentConnection) writePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				logrus.WithError(err).Debugf("Failed to write message to agent %s", c.ID)
+				_ = w.Close()
+				return
+			}
 
 			// Add queued messages to the current websocket message
 			n := len(c.Send)
@@ -116,8 +134,14 @@ func (c *AgentConnection) writePump() {
 			for i := 0; i < n; i++ {
 				select {
 				case queuedMessage := <-c.Send:
-					w.Write([]byte{'\n'})
-					w.Write(queuedMessage)
+					if _, err := w.Write([]byte{'\n'}); err != nil {
+						logrus.WithError(err).Debugf("Failed to write queued separator for agent %s", c.ID)
+						break drain
+					}
+					if _, err := w.Write(queuedMessage); err != nil {
+						logrus.WithError(err).Debugf("Failed to write queued message for agent %s", c.ID)
+						break drain
+					}
 				default:
 					// No more messages available
 					break drain
@@ -129,7 +153,10 @@ func (c *AgentConnection) writePump() {
 			}
 
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				logrus.WithError(err).Warnf("Failed to set ping deadline for agent %s", c.ID)
+				return
+			}
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

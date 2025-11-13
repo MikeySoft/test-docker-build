@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mikeysoft/flotilla/internal/server/auth"
 	"github.com/mikeysoft/flotilla/internal/server/database"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -188,10 +189,12 @@ func (h *UsersHandler) DeleteUserPermanently(c *gin.Context) {
 	}
 
 	// Audit log
-	auth.LogAuditEvent(&currentUserID, "user_deleted", "user", &userUUID, map[string]interface{}{
+	if err := auth.LogAuditEvent(&currentUserID, "user_deleted", "user", &userUUID, map[string]interface{}{
 		"deleted_username": user.Username,
 		"deleted_email":    user.Email,
-	}, c.ClientIP(), c.GetHeader("User-Agent"))
+	}, c.ClientIP(), c.GetHeader("User-Agent")); err != nil {
+		logrus.WithError(err).Warn("Failed to record user_deleted audit event")
+	}
 
 	// Permanently delete the user (this will cascade to refresh tokens due to foreign key constraint)
 	if err := database.DB.Unscoped().Delete(&user).Error; err != nil {

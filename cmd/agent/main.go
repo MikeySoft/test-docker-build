@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -269,6 +270,7 @@ func loadOrGenerateAgentID(envAgentID string) string {
 // loadAgentIDFromFile loads agent ID from the persistence file
 func loadAgentIDFromFile() string {
 	// Try system path first
+	// #nosec G304 -- fixed agent ID path under /var/lib
 	if data, err := os.ReadFile(agentIDFile); err == nil {
 		var idData struct {
 			AgentID string `json:"agent_id"`
@@ -282,6 +284,7 @@ func loadAgentIDFromFile() string {
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
 		homePath := filepath.Join(homeDir, agentIDFileHome)
+		// #nosec G304 -- path within user home .flotilla directory
 		if data, err := os.ReadFile(homePath); err == nil {
 			var idData struct {
 				AgentID string `json:"agent_id"`
@@ -309,8 +312,8 @@ func saveAgentIDToFile(agentID string) error {
 	}
 
 	// Try system path first
-	if err := os.MkdirAll(filepath.Dir(agentIDFile), 0755); err == nil {
-		if err := os.WriteFile(agentIDFile, data, 0644); err == nil {
+	if err := os.MkdirAll(filepath.Dir(agentIDFile), 0o750); err == nil {
+		if err := os.WriteFile(agentIDFile, data, 0o600); err == nil {
 			return nil
 		}
 	}
@@ -322,11 +325,11 @@ func saveAgentIDToFile(agentID string) error {
 	}
 
 	homePath := filepath.Join(homeDir, agentIDFileHome)
-	if err := os.MkdirAll(filepath.Dir(homePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(homePath), 0o750); err != nil {
 		return err
 	}
 
-	return os.WriteFile(homePath, data, 0644)
+	return os.WriteFile(homePath, data, 0o600)
 }
 
 // setupLogging configures the logging system
@@ -527,7 +530,10 @@ func (a *Agent) sendResponse(response *protocol.Message) {
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
 
-	a.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if err := a.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		logrus.WithError(err).Warn("Failed to set write deadline for response")
+		return
+	}
 	if err := a.Conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		logrus.Errorf("Failed to send response: %v", err)
 		return
@@ -563,12 +569,16 @@ func (a *Agent) readMessages(conn *websocket.Conn, messageCh chan<- *protocol.Me
 
 	// Set up pong handler
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			logrus.WithError(err).Warn("Failed to extend read deadline after pong")
+		}
 		return nil
 	})
 
 	// Set initial read deadline
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		logrus.WithError(err).Warn("Failed to set initial read deadline")
+	}
 
 	for {
 		_, messageData, err := conn.ReadMessage()
@@ -582,7 +592,9 @@ func (a *Agent) readMessages(conn *websocket.Conn, messageCh chan<- *protocol.Me
 		}
 
 		// Update read deadline after successful read
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			logrus.WithError(err).Warn("Failed to extend read deadline after message")
+		}
 
 		msg, err := protocol.DeserializeMessage(messageData)
 		if err != nil {
@@ -609,9 +621,14 @@ func (a *Agent) writeMessages(conn *websocket.Conn, writeCh <-chan []byte) {
 	for {
 		select {
 		case message, ok := <-writeCh:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				logrus.WithError(err).Warn("Failed to set write deadline for outgoing message")
+				return
+			}
 			if !ok {
-				conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+					logrus.WithError(err).Debug("Failed to send close message")
+				}
 				return
 			}
 
@@ -621,7 +638,10 @@ func (a *Agent) writeMessages(conn *websocket.Conn, writeCh <-chan []byte) {
 			}
 
 		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				logrus.WithError(err).Warn("Failed to set write deadline for ping")
+				return
+			}
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				logrus.Errorf("Failed to send ping: %v", err)
 				return
@@ -651,7 +671,10 @@ func (a *Agent) sendHeartbeat(conn *websocket.Conn) {
 	a.writeMu.Lock()
 	defer a.writeMu.Unlock()
 
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		logrus.WithError(err).Warn("Failed to set write deadline for heartbeat")
+		return
+	}
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		logrus.Errorf("Failed to send heartbeat: %v", err)
 	}
@@ -665,8 +688,10 @@ func (a *Agent) pingPongLoop(conn *websocket.Conn) {
 	for range ticker.C {
 		// Lock mutex to prevent concurrent writes to websocket
 		a.writeMu.Lock()
-		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		err := conn.WriteMessage(websocket.PingMessage, nil)
+		err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if err == nil {
+			err = conn.WriteMessage(websocket.PingMessage, nil)
+		}
 		a.writeMu.Unlock()
 
 		if err != nil {
@@ -703,8 +728,13 @@ func (w *WebSocketWrapper) SendLogEvent(containerID, data, stream string, timest
 	w.agent.writeMu.Lock()
 	defer w.agent.writeMu.Unlock()
 
-	w.agent.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return w.agent.Conn.WriteMessage(websocket.TextMessage, eventData)
+	if err := w.agent.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return fmt.Errorf("failed to set log event write deadline: %w", err)
+	}
+	if err := w.agent.Conn.WriteMessage(websocket.TextMessage, eventData); err != nil {
+		return fmt.Errorf("failed to send log event: %w", err)
+	}
+	return nil
 }
 
 // MetricsSenderWrapper wraps the agent's WebSocket connection to implement the MetricsSender interface
@@ -727,6 +757,11 @@ func (m *MetricsSenderWrapper) SendMetrics(message *protocol.Message) error {
 	m.agent.writeMu.Lock()
 	defer m.agent.writeMu.Unlock()
 
-	m.agent.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return m.agent.Conn.WriteMessage(websocket.TextMessage, data)
+	if err := m.agent.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return fmt.Errorf("failed to set metrics write deadline: %w", err)
+	}
+	if err := m.agent.Conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		return fmt.Errorf("failed to send metrics message: %w", err)
+	}
+	return nil
 }

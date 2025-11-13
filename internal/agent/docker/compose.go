@@ -40,7 +40,7 @@ func runCompose(ctx context.Context, workDir string, args ...string) ([]byte, er
 	}
 	// Try v2: docker compose <args>
 	v2Args := append([]string{"compose"}, args...)
-	cmdV2 := exec.CommandContext(ctx, "docker", v2Args...)
+	cmdV2 := exec.CommandContext(ctx, "docker", v2Args...) // #nosec G204 -- command name fixed and args validated by validateComposeArgs
 	cmdV2.Dir = workDir
 	cmdV2.Env = os.Environ()
 	outV2, errV2 := cmdV2.CombinedOutput()
@@ -49,7 +49,7 @@ func runCompose(ctx context.Context, workDir string, args ...string) ([]byte, er
 	}
 
 	// Try v1: docker-compose <args>
-	cmdV1 := exec.CommandContext(ctx, "docker-compose", args...)
+	cmdV1 := exec.CommandContext(ctx, "docker-compose", args...) // #nosec G204 -- command name fixed and args validated by validateComposeArgs
 	cmdV1.Dir = workDir
 	cmdV1.Env = os.Environ()
 	outV1, errV1 := cmdV1.CombinedOutput()
@@ -358,7 +358,7 @@ func (c *ComposeClient) ListStacks(ctx context.Context) ([]map[string]interface{
 		if err == nil {
 			composePath := filepath.Join(stackDir, dockerComposeFileName)
 			if _, err := os.Stat(composePath); err == nil {
-				content, readErr := os.ReadFile(composePath)
+				content, readErr := os.ReadFile(composePath) // #nosec G304 -- composePath derived from sanitized stack directory
 				if readErr == nil {
 					composeContent = string(content)
 				}
@@ -449,7 +449,7 @@ func (c *ComposeClient) GetStack(ctx context.Context, stackName string) (map[str
 	composePath := filepath.Join(stackDir, dockerComposeFileName)
 	composeContent := ""
 	if _, err := os.Stat(composePath); err == nil {
-		content, err := os.ReadFile(composePath)
+		content, err := os.ReadFile(composePath) // #nosec G304 -- composePath derived from sanitized stack directory
 		if err == nil {
 			composeContent = string(content)
 		}
@@ -459,7 +459,7 @@ func (c *ComposeClient) GetStack(ctx context.Context, stackName string) (map[str
 	envPath := filepath.Join(stackDir, envFileName)
 	envVars := map[string]interface{}{}
 	if _, err := os.Stat(envPath); err == nil {
-		content, err := os.ReadFile(envPath)
+		content, err := os.ReadFile(envPath) // #nosec G304 -- envPath constrained within sanitized stack directory
 		if err == nil {
 			envLines := strings.Split(string(content), "\n")
 			for _, line := range envLines {

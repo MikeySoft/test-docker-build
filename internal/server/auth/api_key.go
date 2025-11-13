@@ -141,6 +141,9 @@ func ListAPIKeys() ([]database.APIKey, error) {
 // generateRandomKey generates a random 32-byte key
 func generateRandomKey() string {
 	bytes := make([]byte, 32)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		logrus.WithError(err).Warn("Failed to generate random API key; using fallback UUID data")
+		return strings.ReplaceAll(uuid.New().String(), "-", "")
+	}
 	return hex.EncodeToString(bytes)
 }

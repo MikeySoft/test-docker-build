@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -80,7 +81,9 @@ func (h *Hub) LogStreamHandler(c *gin.Context) {
 
 	if containerID == "" || hostID == "" {
 		logrus.Errorf("Missing required parameters: container_id=%s, host_id=%s", containerID, hostID)
-		conn.Close()
+		if err := conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+			logrus.WithError(err).Debug("failed to close invalid log stream connection")
+		}
 		return
 	}
 
@@ -114,14 +117,20 @@ func (h *Hub) LogStreamHandler(c *gin.Context) {
 func (c *LogStreamConnection) startPumps() {
 	defer func() {
 		c.Hub.unregisterLogStream <- c
-		c.Conn.Close()
+		if err := c.Conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+			logrus.WithError(err).Debugf("Failed to close log stream connection %s", c.ID)
+		}
 	}()
 
 	// Set up connection parameters
 	c.Conn.SetReadLimit(maxMessageSize)
-	c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+	if err := c.Conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		logrus.WithError(err).Warnf("Failed to set read deadline for log stream %s", c.ID)
+	}
 	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(pongWait))
+		if err := c.Conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			logrus.WithError(err).Warnf("Failed to extend read deadline for log stream %s", c.ID)
+		}
 		return nil
 	})
 
@@ -132,9 +141,14 @@ func (c *LogStreamConnection) startPumps() {
 	for {
 		select {
 		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				logrus.WithError(err).Warnf("Failed to set write deadline for log stream %s", c.ID)
+				return
+			}
 			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+					logrus.WithError(err).Debugf("Failed to send close message for log stream %s", c.ID)
+				}
 				return
 			}
 
@@ -142,7 +156,10 @@ func (c *LogStreamConnection) startPumps() {
 				return
 			}
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				logrus.WithError(err).Warnf("Failed to set ping deadline for log stream %s", c.ID)
+				return
+			}
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

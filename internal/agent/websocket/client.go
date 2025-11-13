@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -110,7 +111,9 @@ func (c *Client) Disconnect() error {
 	close(c.stopCh)
 
 	if c.conn != nil {
-		c.conn.Close()
+		if err := c.conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+			logrus.WithError(err).Debug("Failed to close agent websocket connection cleanly")
+		}
 	}
 
 	logrus.Info("Disconnected from server")
@@ -160,9 +163,13 @@ func (c *Client) readPump() {
 	}()
 
 	c.conn.SetReadLimit(512)
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	if err := c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		logrus.WithError(err).Warn("Failed to set initial read deadline for agent websocket")
+	}
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if err := c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			logrus.WithError(err).Warn("Failed to extend read deadline for agent websocket")
+		}
 		return nil
 	})
 
@@ -211,7 +218,10 @@ func (c *Client) writePump() {
 		case <-c.stopCh:
 			return
 		case command := <-c.commandCh:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				logrus.WithError(err).Warn("Failed to set write deadline for command")
+				return
+			}
 			data, err := command.Serialize()
 			if err != nil {
 				logrus.Errorf("Failed to serialize command: %v", err)
@@ -222,7 +232,10 @@ func (c *Client) writePump() {
 				return
 			}
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				logrus.WithError(err).Warn("Failed to set ping write deadline")
+				return
+			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				logrus.Errorf("Failed to write ping: %v", err)
 				return
@@ -258,7 +271,10 @@ func (c *Client) heartbeatLoop() {
 					continue
 				}
 
-				c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+					logrus.WithError(err).Warn("Failed to set heartbeat write deadline")
+					continue
+				}
 				if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
 					logrus.Errorf("Failed to send heartbeat: %v", err)
 				}
@@ -328,8 +344,13 @@ func (c *Client) SendLogEvent(containerID, data, stream string, timestamp time.T
 		return fmt.Errorf("failed to serialize log event: %v", err)
 	}
 
-	c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return c.conn.WriteMessage(websocket.TextMessage, eventData)
+	if err := c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return fmt.Errorf("failed to set log event write deadline: %w", err)
+	}
+	if err := c.conn.WriteMessage(websocket.TextMessage, eventData); err != nil {
+		return fmt.Errorf("failed to send log event: %w", err)
+	}
+	return nil
 }
 
 // Reconnect attempts to reconnect to the server with exponential backoff

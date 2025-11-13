@@ -3,11 +3,14 @@ package websocket
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/mikeysoft/flotilla/internal/server/auth"
 	"github.com/sirupsen/logrus"
 )
@@ -27,14 +30,18 @@ func (h *Hub) AgentWebSocketHandler(c *gin.Context) {
 
 	if apiKey == "" {
 		logrus.Warn("Agent connection rejected: missing API key")
-		conn.Close()
+		if err := conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+			logrus.WithError(err).Debug("failed to close rejected agent connection")
+		}
 		return
 	}
 
 	apiKeyRecord, err := auth.ValidateAPIKey(apiKey)
 	if err != nil {
 		logrus.Warnf("Agent authentication failed: %v", err)
-		conn.Close()
+		if err := conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+			logrus.WithError(err).Debug("failed to close unauthenticated agent connection")
+		}
 		return
 	}
 
@@ -95,7 +102,10 @@ func (h *Hub) UIWebSocketHandler(c *gin.Context) {
 // generateClientID generates a unique client ID for UI connections
 func generateClientID() string {
 	bytes := make([]byte, 16)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		logrus.WithError(err).Warn("Failed to generate secure random client ID; using timestamp fallback")
+		return hex.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano)))
+	}
 	return hex.EncodeToString(bytes)
 }
 

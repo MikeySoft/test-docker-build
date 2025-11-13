@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -434,7 +435,9 @@ func (h *Hub) checkAgentHeartbeats() {
 	for _, agent := range agents {
 		if now.Sub(agent.LastSeen) > 2*time.Minute {
 			logrus.Warnf("Agent %s heartbeat timeout, disconnecting", agent.ID)
-			agent.Conn.Close()
+			if err := agent.Conn.Close(); err != nil && !errors.Is(err, websocket.ErrCloseSent) {
+				logrus.WithError(err).Debugf("Failed to close stale agent connection %s", agent.ID)
+			}
 		}
 	}
 }

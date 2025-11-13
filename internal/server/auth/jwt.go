@@ -31,6 +31,7 @@ func initKeys() {
 			if privFile == "" {
 				privFile = "jwt_private.pem"
 			}
+			// #nosec G304 -- path comes from trusted admin configuration
 			if data, err := os.ReadFile(privFile); err == nil {
 				privData = data
 			}

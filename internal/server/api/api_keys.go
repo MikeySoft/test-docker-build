@@ -127,11 +127,13 @@ func (h *APIKeysHandler) CreateAPIKey(c *gin.Context) {
 	logrus.Infof("Generated API key for %s: %s (len=%d)", req.Name, masked, len(fullKey))
 
 	// Audit log API key creation
-	auth.LogAuditEvent(&userID, "api_key_created", "api_key", &apiKeyRecord.ID, map[string]interface{}{
+	if err := auth.LogAuditEvent(&userID, "api_key_created", "api_key", &apiKeyRecord.ID, map[string]interface{}{
 		"name":    req.Name,
 		"prefix":  prefix,
 		"host_id": req.HostID,
-	}, c.ClientIP(), c.GetHeader(userAgentHeader))
+	}, c.ClientIP(), c.GetHeader(userAgentHeader)); err != nil {
+		logrus.WithError(err).Warn("Failed to record api_key_created audit event")
+	}
 
 	c.JSON(http.StatusCreated, CreateAPIKeyResponse{
 		APIKey: fullKey,
@@ -236,9 +238,11 @@ func (h *APIKeysHandler) RevokeAPIKey(c *gin.Context) {
 	userIDStr, exists := c.Get("user_id")
 	if exists {
 		if userUUID, err := uuid.Parse(userIDStr.(string)); err == nil {
-			auth.LogAuditEvent(&userUUID, "api_key_revoked", "api_key", &keyUUID, map[string]interface{}{
+			if err := auth.LogAuditEvent(&userUUID, "api_key_revoked", "api_key", &keyUUID, map[string]interface{}{
 				"key_id": keyID,
-			}, c.ClientIP(), c.GetHeader(userAgentHeader))
+			}, c.ClientIP(), c.GetHeader(userAgentHeader)); err != nil {
+				logrus.WithError(err).Warn("Failed to record api_key_revoked audit event")
+			}
 		}
 	}
 
@@ -250,13 +254,23 @@ func (h *APIKeysHandler) RevokeAPIKey(c *gin.Context) {
 // Helper functions for API key generation
 func generateAPIKeyPrefix() string {
 	bytes := make([]byte, 4)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		logrus.WithError(err).Warn("Failed to generate random API key prefix; using fallback")
+		fallback := hex.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano)))
+		if len(fallback) < 8 {
+			return strings.ToUpper(fallback)
+		}
+		return strings.ToUpper(fallback[:8])
+	}
 	return strings.ToUpper(hex.EncodeToString(bytes))
 }
 
 func generateAPIKeySecret() string {
 	bytes := make([]byte, 16)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		logrus.WithError(err).Warn("Failed to generate random API key secret; using UUID fallback")
+		return strings.ReplaceAll(uuid.New().String(), "-", "")
+	}
 	return hex.EncodeToString(bytes)
 }
 
@@ -304,10 +318,12 @@ func (h *APIKeysHandler) DeleteAPIKeyPermanently(c *gin.Context) {
 	}
 
 	// Audit log
-	auth.LogAuditEvent(&userID, "api_key_deleted", "api_key", &keyUUID, map[string]interface{}{
+	if err := auth.LogAuditEvent(&userID, "api_key_deleted", "api_key", &keyUUID, map[string]interface{}{
 		"key_name":   key.Name,
 		"key_prefix": key.Prefix,
-	}, c.ClientIP(), c.GetHeader(userAgentHeader))
+	}, c.ClientIP(), c.GetHeader(userAgentHeader)); err != nil {
+		logrus.WithError(err).Warn("Failed to record api_key_deleted audit event")
+	}
 
 	// Permanently delete the API key
 	if err := database.DB.Unscoped().Delete(&key).Error; err != nil {

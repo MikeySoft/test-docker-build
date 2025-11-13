@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,11 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	gorillawebsocket "github.com/gorilla/websocket"
 	"github.com/mikeysoft/flotilla/internal/server/auth"
 	"github.com/mikeysoft/flotilla/internal/server/database"
 	appLogs "github.com/mikeysoft/flotilla/internal/server/logs"
 	"github.com/mikeysoft/flotilla/internal/server/topology"
-	"github.com/mikeysoft/flotilla/internal/server/websocket"
+	serverws "github.com/mikeysoft/flotilla/internal/server/websocket"
 	sharedconfig "github.com/mikeysoft/flotilla/internal/shared/config"
 	"github.com/mikeysoft/flotilla/internal/shared/protocol"
 	"github.com/mikeysoft/flotilla/internal/shared/querydsl"
@@ -27,13 +29,13 @@ const (
 
 // HostsHandler handles host-related API endpoints
 type HostsHandler struct {
-	hub      *websocket.Hub
+	hub      *serverws.Hub
 	logs     *appLogs.Manager
 	topology *topology.Manager
 }
 
 // NewHostsHandler creates a new hosts handler
-func NewHostsHandler(hub *websocket.Hub, logs *appLogs.Manager, topologyManager *topology.Manager) *HostsHandler {
+func NewHostsHandler(hub *serverws.Hub, logs *appLogs.Manager, topologyManager *topology.Manager) *HostsHandler {
 	return &HostsHandler{
 		hub:      hub,
 		logs:     logs,
@@ -76,9 +78,11 @@ func (h *HostsHandler) DeleteHost(c *gin.Context) {
 	// If an agent is connected, mark as offline and close connection
 	if agent, exists := h.hub.GetAgentByHost(hostID); exists {
 		// Best-effort close: unregister will update status to offline
-		go func(a *websocket.AgentConnection) {
+		go func(a *serverws.AgentConnection) {
 			defer func() { recover() }()
-			a.Conn.Close()
+			if err := a.Conn.Close(); err != nil && !errors.Is(err, gorillawebsocket.ErrCloseSent) {
+				logrus.WithError(err).Debugf("Failed to close agent connection while deleting host %s", hostID)
+			}
 		}(agent)
 	}
 
