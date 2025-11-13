@@ -1,6 +1,6 @@
 module github.com/mikeysoft/flotilla
 
-go 1.21
+go 1.24.0
 
 require (
 	github.com/docker/docker v24.0.7+incompatible
@@ -57,7 +57,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
@@ -72,3 +72,5 @@ require (
 	google.golang.org/protobuf v1.31.0 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
 )
+
+replace github.com/rogpeppe/go-internal => github.com/rogpeppe/go-internal v1.12.0
