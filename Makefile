@@ -16,6 +16,7 @@ DIST_DIR := dist/release
 TMP_DIR := $(DIST_DIR)/tmp
 
 VERSION ?= $(shell ./scripts/resolve-version.sh)
+SAFE_VERSION := $(subst /,-,$(VERSION))
 MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 MINOR := $(word 2,$(subst ., ,$(VERSION)))
 PATCH := $(word 3,$(subst ., ,$(VERSION)))
@@ -29,7 +30,7 @@ endif
 ifeq ($(IS_RELEASE),true)
 PRIMARY_TAG := v$(VERSION)
 else
-PRIMARY_TAG := $(VERSION)
+PRIMARY_TAG := $(SAFE_VERSION)
 endif
 
 SERVER_TAGS_BASE := $(SERVER_IMAGE):$(PRIMARY_TAG)
@@ -219,7 +220,7 @@ frontend-dev:
 	@echo "Run the Vite dev server with: cd web && npm run dev"
 
 package-binaries: release-clean
-	@echo "Packaging binaries for version $(VERSION)..."
+	@echo "Packaging binaries for version $(SAFE_VERSION)..."
 	@mkdir -p $(TMP_DIR)
 	@mkdir -p $(DIST_DIR)
 	@for platform in $(BIN_PLATFORMS); do \
@@ -238,8 +239,8 @@ package-binaries: release-clean
 		cp deployments/systemd/flotilla-server.service $$out_server/; \
 		cp deployments/systemd/flotilla-agent.service $$out_agent/; \
 		cp deployments/agent/env.example $$out_agent/agent.env.example; \
-		tar -czf $(DIST_DIR)/flotilla-server_$(VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_server .; \
-		tar -czf $(DIST_DIR)/flotilla-agent_$(VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_agent .; \
+		tar -czf $(DIST_DIR)/flotilla-server_$(SAFE_VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_server .; \
+		tar -czf $(DIST_DIR)/flotilla-agent_$(SAFE_VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_agent .; \
 	done
 	@rm -rf $(TMP_DIR)
 
