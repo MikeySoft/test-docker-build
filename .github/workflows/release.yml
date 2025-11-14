@@ -17,9 +17,13 @@ env:
   NODE_VERSION: "20.x"
 
 jobs:
-  artifacts:
-    name: Build release artifacts
+  determine-version:
+    name: Determine version and ref
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      ref: ${{ steps.version.outputs.ref }}
     steps:
       - name: Determine version and ref
         id: version
@@ -39,10 +43,15 @@ jobs:
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
           echo "ref=${REF}" >> $GITHUB_OUTPUT
 
+  artifacts:
+    name: Build release artifacts
+    needs: determine-version
+    runs-on: ubuntu-latest
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.version.outputs.ref }}
+          ref: ${{ needs.determine-version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -64,7 +73,7 @@ jobs:
 
       - name: Build release artifacts
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
           VERSION="${VERSION}" make release-artifacts
 
@@ -76,7 +85,7 @@ jobs:
 
   docker-build:
     name: Build Docker images (${{ matrix.arch }})
-    needs: artifacts
+    needs: [determine-version, artifacts]
     strategy:
       matrix:
         include:
@@ -86,25 +95,10 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Determine version and ref
-        id: version
-        run: |
-          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            TAG="${{ github.event.client_payload.tag }}"
-            VERSION="${TAG#v}"
-            REF="${TAG}"
-          else
-            RAW_VERSION="${{ github.ref_name }}"
-            VERSION="${RAW_VERSION#v}"
-            REF="${{ github.ref }}"
-          fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "ref=${REF}" >> $GITHUB_OUTPUT
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.version.outputs.ref }}
+          ref: ${{ needs.determine-version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -119,7 +113,7 @@ jobs:
 
       - name: Build and push image (${{ matrix.arch }})
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
           VERSION="${VERSION}" \
           ARCH="${{ matrix.arch }}" \
@@ -131,28 +125,13 @@ jobs:
 
   docker-manifests:
     name: Publish multi-arch manifests
-    needs: docker-build
+    needs: [determine-version, docker-build]
     runs-on: ubuntu-latest
     steps:
-      - name: Determine version and ref
-        id: version
-        run: |
-          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            TAG="${{ github.event.client_payload.tag }}"
-            VERSION="${TAG#v}"
-            REF="${TAG}"
-          else
-            RAW_VERSION="${{ github.ref_name }}"
-            VERSION="${RAW_VERSION#v}"
-            REF="${{ github.ref }}"
-          fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "ref=${REF}" >> $GITHUB_OUTPUT
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.version.outputs.ref }}
+          ref: ${{ needs.determine-version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -167,7 +146,7 @@ jobs:
 
       - name: Create manifests
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
           VERSION="${VERSION}" \
           PUBLISH="true" \
@@ -178,6 +157,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs:
+      - determine-version
       - artifacts
       - docker-manifests
     runs-on: ubuntu-latest
@@ -188,20 +168,10 @@ jobs:
           name: release-artifacts
           path: dist/release
 
-      - name: Determine tag
-        id: tag
-        run: |
-          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            TAG="${{ github.event.client_payload.tag }}"
-          else
-            TAG="${{ github.ref_name }}"
-          fi
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.determine-version.outputs.tag }}
           files: |
             dist/release/*.tar.gz
             dist/release/SHA256SUMS
