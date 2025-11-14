@@ -17,13 +17,9 @@ env:
   NODE_VERSION: "20.x"
 
 jobs:
-  determine-version:
-    name: Determine version and ref
+  artifacts:
+    name: Build release artifacts
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      ref: ${{ steps.version.outputs.ref }}
     steps:
       - name: Determine version and ref
         id: version
@@ -31,10 +27,6 @@ jobs:
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
             # Extract tag from repository_dispatch payload
             TAG="${{ github.event.client_payload.tag }}"
-            if [[ -z "$TAG" ]]; then
-              echo "Error: 'tag' is missing or empty in github.event.client_payload." >&2
-              exit 1
-            fi
             VERSION="${TAG#v}"
             REF="${TAG}"
           else
@@ -47,15 +39,10 @@ jobs:
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
           echo "ref=${REF}" >> $GITHUB_OUTPUT
 
-  artifacts:
-    name: Build release artifacts
-    needs: determine-version
-    runs-on: ubuntu-latest
-    steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.determine-version.outputs.ref }}
+          ref: ${{ steps.version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -77,7 +64,7 @@ jobs:
 
       - name: Build release artifacts
         env:
-          VERSION: ${{ needs.determine-version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           VERSION="${VERSION}" make release-artifacts
 
@@ -89,7 +76,7 @@ jobs:
 
   docker-build:
     name: Build Docker images (${{ matrix.arch }})
-    needs: [determine-version, artifacts]
+    needs: artifacts
     strategy:
       matrix:
         include:
@@ -99,10 +86,25 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Determine version and ref
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            TAG="${{ github.event.client_payload.tag }}"
+            VERSION="${TAG#v}"
+            REF="${TAG}"
+          else
+            RAW_VERSION="${{ github.ref_name }}"
+            VERSION="${RAW_VERSION#v}"
+            REF="${{ github.ref }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "ref=${REF}" >> $GITHUB_OUTPUT
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.determine-version.outputs.ref }}
+          ref: ${{ steps.version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -117,7 +119,7 @@ jobs:
 
       - name: Build and push image (${{ matrix.arch }})
         env:
-          VERSION: ${{ needs.determine-version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           VERSION="${VERSION}" \
           ARCH="${{ matrix.arch }}" \
@@ -129,13 +131,28 @@ jobs:
 
   docker-manifests:
     name: Publish multi-arch manifests
-    needs: [determine-version, docker-build]
+    needs: docker-build
     runs-on: ubuntu-latest
     steps:
+      - name: Determine version and ref
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            TAG="${{ github.event.client_payload.tag }}"
+            VERSION="${TAG#v}"
+            REF="${TAG}"
+          else
+            RAW_VERSION="${{ github.ref_name }}"
+            VERSION="${RAW_VERSION#v}"
+            REF="${{ github.ref }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "ref=${REF}" >> $GITHUB_OUTPUT
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.determine-version.outputs.ref }}
+          ref: ${{ steps.version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -150,7 +167,7 @@ jobs:
 
       - name: Create manifests
         env:
-          VERSION: ${{ needs.determine-version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           VERSION="${VERSION}" \
           PUBLISH="true" \
@@ -161,7 +178,6 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs:
-      - determine-version
       - artifacts
       - docker-manifests
     runs-on: ubuntu-latest
@@ -172,10 +188,62 @@ jobs:
           name: release-artifacts
           path: dist/release
 
+      - name: Determine tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            TAG="${{ github.event.client_payload.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Generate release body with Docker images
+        id: release-body
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Extract version from tag (e.g., v1.2.3 -> 1.2.3)
+          VERSION="${TAG#v}"
+
+          # Generate Docker image links using GitHub variables
+          SERVER_IMAGE="ghcr.io/${REPO_OWNER}/flotilla-server"
+          AGENT_IMAGE="ghcr.io/${REPO_OWNER}/flotilla-agent"
+
+          # Create release body with Docker image information
+          cat > /tmp/release_body.md << EOF
+
+          ## Container Images
+
+          This release includes the following container images:
+
+          ### Server Image
+          - **Full tag**: \`${SERVER_IMAGE}:${TAG}\`
+          - **Pull command**: \`docker pull ${SERVER_IMAGE}:${TAG}\`
+          - [View on GitHub Container Registry](https://github.com/${REPO}/pkgs/container/flotilla-server)
+
+          ### Agent Image
+          - **Full tag**: \`${AGENT_IMAGE}:${TAG}\`
+          - **Pull command**: \`docker pull ${AGENT_IMAGE}:${TAG}\`
+          - [View on GitHub Container Registry](https://github.com/${REPO}/pkgs/container/flotilla-agent)
+
+          ### Additional Tags
+
+          The following tags are also available for this release:
+          - \`${TAG}\` (specific version)
+          - \`v${VERSION%.*}\` (minor version)
+          - \`v${VERSION%%.*}\` (major version)
+          - \`latest\` (latest release)
+
+          EOF
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.determine-version.outputs.tag }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          body_path: /tmp/release_body.md
           files: |
             dist/release/*.tar.gz
             dist/release/SHA256SUMS
