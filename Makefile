@@ -267,11 +267,11 @@ docker-build-agent:
 docker-release: docker-build-server docker-build-agent
 
 docker-manifests:
-	@if [[ "$(strip $(PUBLISH))" != "true" ]]; then \
+	@if [ "$(strip $(PUBLISH))" != "true" ]; then \
 		echo "docker-manifests requires PUBLISH=true"; \
 		exit 1; \
 	fi
-	@if [[ -z "$(strip $(ARCH_LIST))" ]]; then \
+	@if [ -z "$(strip $(ARCH_LIST))" ]; then \
 		echo "docker-manifests requires ARCH_LIST to list target platforms (e.g. 'linux/amd64 linux/arm64')"; \
 		exit 1; \
 	fi
