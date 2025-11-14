@@ -31,7 +31,7 @@ jobs:
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             # Sanitize branch name: replace / with - and remove other invalid chars
-            SAFE_BRANCH=$(echo "${GITHUB_HEAD_REF}" | tr '/' '-' | tr -d '":<>|*?\\\r\n')
+            SAFE_BRANCH=$(echo "${GITHUB_HEAD_REF}" | tr '/' '-' | tr -d $'":<>|*?\\\r\n')
             VERSION="pr-${SAFE_BRANCH}-${GITHUB_SHA::7}"
             echo "artifact_name=flotilla-snapshot-pr-${SAFE_BRANCH}-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           else
