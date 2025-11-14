@@ -5,6 +5,8 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  repository_dispatch:
+    types: [release-tag]
 
 permissions:
   contents: write
@@ -15,13 +17,45 @@ env:
   NODE_VERSION: "20.x"
 
 jobs:
+  determine-version:
+    name: Determine version and ref
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      ref: ${{ steps.version.outputs.ref }}
+    steps:
+      - name: Determine version and ref
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            # Extract tag from repository_dispatch payload
+            TAG="${{ github.event.client_payload.tag }}"
+            if [[ -z "$TAG" ]]; then
+              echo "Error: 'tag' is missing or empty in github.event.client_payload." >&2
+              exit 1
+            fi
+            VERSION="${TAG#v}"
+            REF="${TAG}"
+          else
+            # Extract from ref_name (push or workflow_dispatch)
+            RAW_VERSION="${{ github.ref_name }}"
+            VERSION="${RAW_VERSION#v}"
+            REF="${{ github.ref }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "ref=${REF}" >> $GITHUB_OUTPUT
+
   artifacts:
     name: Build release artifacts
+    needs: determine-version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.determine-version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -43,9 +77,9 @@ jobs:
 
       - name: Build release artifacts
         env:
-          RAW_VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
-          VERSION="${RAW_VERSION#v}" make release-artifacts
+          VERSION="${VERSION}" make release-artifacts
 
       - name: Upload release assets
         uses: actions/upload-artifact@v4
@@ -55,7 +89,7 @@ jobs:
 
   docker-build:
     name: Build Docker images (${{ matrix.arch }})
-    needs: artifacts
+    needs: [determine-version, artifacts]
     strategy:
       matrix:
         include:
@@ -68,6 +102,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.determine-version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -82,9 +117,9 @@ jobs:
 
       - name: Build and push image (${{ matrix.arch }})
         env:
-          RAW_VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
-          VERSION="${RAW_VERSION#v}" \
+          VERSION="${VERSION}" \
           ARCH="${{ matrix.arch }}" \
           PUBLISH="true" \
           EDGE_TAG="false" \
@@ -94,12 +129,13 @@ jobs:
 
   docker-manifests:
     name: Publish multi-arch manifests
-    needs: docker-build
+    needs: [determine-version, docker-build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.determine-version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -114,9 +150,9 @@ jobs:
 
       - name: Create manifests
         env:
-          RAW_VERSION: ${{ github.ref_name }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
         run: |
-          VERSION="${RAW_VERSION#v}" \
+          VERSION="${VERSION}" \
           PUBLISH="true" \
           EDGE_TAG="false" \
           ARCH_LIST="linux/amd64 linux/arm64" \
@@ -125,6 +161,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs:
+      - determine-version
       - artifacts
       - docker-manifests
     runs-on: ubuntu-latest
@@ -138,6 +175,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.determine-version.outputs.tag }}
           files: |
             dist/release/*.tar.gz
             dist/release/SHA256SUMS

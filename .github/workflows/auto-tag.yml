@@ -144,3 +144,29 @@ jobs:
           git config user.email "github-actions@github.com"
           git tag -a "$TAG" -m "Release $TAG"
           git push "https://${PAT}@github.com/${{ github.repository }}.git" "$TAG"
+
+      - name: Trigger release workflow
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+          PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          echo "Triggering release workflow for tag ${TAG}..."
+
+          # Use repository_dispatch to trigger the release workflow
+          # This is the recommended way to trigger workflows from other workflows
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: token ${PAT}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -d "$(jq -n --arg tag "$TAG" '{event_type:"release-tag", client_payload:{tag:$tag}}')")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          if [[ "${HTTP_CODE}" == "204" ]]; then
+            echo "Release workflow triggered successfully for tag ${TAG}"
+          else
+            echo "Error triggering release workflow (HTTP ${HTTP_CODE}):"
+            echo "$BODY"
+            exit 1
+          fi
