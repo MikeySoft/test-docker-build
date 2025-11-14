@@ -24,7 +24,7 @@ jobs:
 
       - name: Build (linux/amd64)
         run: |
-          BRANCH_SANITIZED="${GITHUB_HEAD_REF//\//-}"
+          BRANCH_SANITIZED="$(echo "${GITHUB_HEAD_REF}" | tr '/' '-' | tr -d '":<>|*?\\\r\n')"
           ARCH="linux/amd64" \
           PUBLISH="false" \
           VERSION="pr-${BRANCH_SANITIZED}-${GITHUB_SHA::7}" \
