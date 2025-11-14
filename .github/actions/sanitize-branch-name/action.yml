@@ -1,0 +1,19 @@
+name: 'Sanitize Branch Name'
+description: 'Sanitizes a branch name by replacing slashes and removing invalid characters'
+inputs:
+  branch-name:
+    description: 'The branch name to sanitize'
+    required: true
+outputs:
+  sanitized-name:
+    description: 'The sanitized branch name'
+    value: ${{ steps.sanitize.outputs.sanitized }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Sanitize branch name
+      id: sanitize
+      shell: bash
+      run: |
+        SANITIZED="$(echo "${{ inputs.branch-name }}" | tr '/' '-' | tr -d '":<>|*?\\\r\n')"
+        echo "sanitized=${SANITIZED}" >> $GITHUB_OUTPUT
