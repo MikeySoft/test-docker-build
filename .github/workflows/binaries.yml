@@ -19,6 +19,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Sanitize branch name
+        if: github.event_name == 'pull_request'
+        id: sanitize
+        uses: ./.github/actions/sanitize-branch-name
+        with:
+          branch-name: ${{ github.head_ref }}
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -27,15 +34,20 @@ jobs:
           cache: true
 
       - name: Package Binaries
+        id: package
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            VERSION="pr-${GITHUB_HEAD_REF}-${GITHUB_SHA::7}" make package-binaries
+            SAFE_BRANCH="${{ steps.sanitize.outputs.sanitized-name }}"
+            VERSION="pr-${SAFE_BRANCH}-${GITHUB_SHA::7}"
+            echo "artifact_name=flotilla-snapshot-pr-${SAFE_BRANCH}-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           else
-            VERSION="sha-${GITHUB_SHA::7}" make package-binaries
+            VERSION="sha-${GITHUB_SHA::7}"
+            echo "artifact_name=flotilla-snapshot-sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           fi
+          VERSION="${VERSION}" make package-binaries
 
       - name: Upload Snapshot Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: flotilla-snapshot-${{ github.ref_type == 'branch' && github.ref != 'refs/heads/main' && format('pr-{0}-{1}', github.head_ref, github.sha) || format('sha-{0}', github.sha) }}
+          name: ${{ steps.package.outputs.artifact_name }}
           path: dist/release/**

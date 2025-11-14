@@ -5,11 +5,18 @@ REGISTRY ?= ghcr.io/mikeysoft
 SERVER_IMAGE ?= $(REGISTRY)/flotilla-server
 AGENT_IMAGE ?= $(REGISTRY)/flotilla-agent
 PLATFORMS ?= linux/amd64,linux/arm64
+ARCH ?= linux/amd64
+ARCH_SUFFIX := $(lastword $(subst /, ,$(ARCH)))
+ARCH_LIST ?=
+BUILDKIT_CACHE ?= false
+CACHE_NAMESPACE ?= flotilla
+CACHE_READONLY ?= false
 BIN_PLATFORMS := linux/amd64 linux/arm64 darwin/arm64
 DIST_DIR := dist/release
 TMP_DIR := $(DIST_DIR)/tmp
 
 VERSION ?= $(shell ./scripts/resolve-version.sh)
+SAFE_VERSION := $(subst /,-,$(VERSION))
 MAJOR := $(word 1,$(subst ., ,$(VERSION)))
 MINOR := $(word 2,$(subst ., ,$(VERSION)))
 PATCH := $(word 3,$(subst ., ,$(VERSION)))
@@ -23,29 +30,45 @@ endif
 ifeq ($(IS_RELEASE),true)
 PRIMARY_TAG := v$(VERSION)
 else
-PRIMARY_TAG := $(VERSION)
+PRIMARY_TAG := $(SAFE_VERSION)
 endif
 
-SERVER_TAGS := --tag $(SERVER_IMAGE):$(PRIMARY_TAG)
-AGENT_TAGS := --tag $(AGENT_IMAGE):$(PRIMARY_TAG)
+SERVER_TAGS_BASE := $(SERVER_IMAGE):$(PRIMARY_TAG)
+AGENT_TAGS_BASE := $(AGENT_IMAGE):$(PRIMARY_TAG)
 ifeq ($(IS_RELEASE),true)
-SERVER_TAGS += --tag $(SERVER_IMAGE):v$(MAJOR).$(MINOR) --tag $(SERVER_IMAGE):v$(MAJOR) --tag $(SERVER_IMAGE):latest
-AGENT_TAGS += --tag $(AGENT_IMAGE):v$(MAJOR).$(MINOR) --tag $(AGENT_IMAGE):v$(MAJOR) --tag $(AGENT_IMAGE):latest
+SERVER_TAGS_BASE += $(SERVER_IMAGE):v$(MAJOR).$(MINOR) $(SERVER_IMAGE):v$(MAJOR) $(SERVER_IMAGE):latest
+AGENT_TAGS_BASE += $(AGENT_IMAGE):v$(MAJOR).$(MINOR) $(AGENT_IMAGE):v$(MAJOR) $(AGENT_IMAGE):latest
 endif
 ifeq ($(strip $(EDGE_TAG)),true)
-SERVER_TAGS += --tag $(SERVER_IMAGE):edge
-AGENT_TAGS += --tag $(AGENT_IMAGE):edge
+SERVER_TAGS_BASE += $(SERVER_IMAGE):edge
+AGENT_TAGS_BASE += $(AGENT_IMAGE):edge
 endif
 
 ifeq ($(strip $(PUBLISH)),true)
+SERVER_TAGS := $(foreach tag,$(SERVER_TAGS_BASE),$(tag)-$(ARCH_SUFFIX))
+AGENT_TAGS := $(foreach tag,$(AGENT_TAGS_BASE),$(tag)-$(ARCH_SUFFIX))
 DOCKER_OUTPUT := --push
-BUILD_PLATFORMS := $(PLATFORMS)
 else
+SERVER_TAGS := $(firstword $(SERVER_TAGS_BASE))
+AGENT_TAGS := $(firstword $(AGENT_TAGS_BASE))
 DOCKER_OUTPUT := --load
-BUILD_PLATFORMS := linux/amd64
 endif
 
-.PHONY: help deps lint lint-go lint-frontend fmt build-server build-agent build-agent-linux build-frontend build-all run-server run-agent run-dev stop-dev clean dist-clean test test-frontend test-coverage generate-api-key db-migrate dev-setup generate-certs frontend-dev package-binaries docker-build-server docker-build-agent docker-release checksums release release-clean release-deps
+ifeq ($(strip $(BUILDKIT_CACHE)),true)
+SERVER_CACHE_SCOPE := $(CACHE_NAMESPACE)-server-$(ARCH_SUFFIX)
+AGENT_CACHE_SCOPE := $(CACHE_NAMESPACE)-agent-$(ARCH_SUFFIX)
+SERVER_CACHE_ARGS := --cache-from type=gha,scope=$(SERVER_CACHE_SCOPE)
+AGENT_CACHE_ARGS := --cache-from type=gha,scope=$(AGENT_CACHE_SCOPE)
+ifneq ($(strip $(CACHE_READONLY)),true)
+SERVER_CACHE_ARGS += --cache-to type=gha,mode=max,scope=$(SERVER_CACHE_SCOPE)
+AGENT_CACHE_ARGS += --cache-to type=gha,mode=max,scope=$(AGENT_CACHE_SCOPE)
+endif
+else
+SERVER_CACHE_ARGS :=
+AGENT_CACHE_ARGS :=
+endif
+
+.PHONY: help deps lint lint-go lint-frontend fmt build-server build-agent build-agent-linux build-frontend build-all run-server run-agent run-dev stop-dev clean dist-clean test test-frontend test-coverage generate-api-key db-migrate dev-setup generate-certs frontend-dev package-binaries docker-build-server docker-build-agent docker-release docker-manifests checksums release release-artifacts release-clean release-deps
 
 help:
 	@echo "Flotilla Commands"
@@ -197,7 +220,7 @@ frontend-dev:
 	@echo "Run the Vite dev server with: cd web && npm run dev"
 
 package-binaries: release-clean
-	@echo "Packaging binaries for version $(VERSION)..."
+	@echo "Packaging binaries for version $(SAFE_VERSION)..."
 	@mkdir -p $(TMP_DIR)
 	@mkdir -p $(DIST_DIR)
 	@for platform in $(BIN_PLATFORMS); do \
@@ -216,30 +239,65 @@ package-binaries: release-clean
 		cp deployments/systemd/flotilla-server.service $$out_server/; \
 		cp deployments/systemd/flotilla-agent.service $$out_agent/; \
 		cp deployments/agent/env.example $$out_agent/agent.env.example; \
-		tar -czf $(DIST_DIR)/flotilla-server_$(VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_server .; \
-		tar -czf $(DIST_DIR)/flotilla-agent_$(VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_agent .; \
+		tar -czf $(DIST_DIR)/flotilla-server_$(SAFE_VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_server .; \
+		tar -czf $(DIST_DIR)/flotilla-agent_$(SAFE_VERSION)_$${goos}_$${goarch}.tar.gz -C $$out_agent .; \
 	done
 	@rm -rf $(TMP_DIR)
 
 docker-build-server:
-	@echo "Building Flotilla server image ($(BUILD_PLATFORMS))..."
+	@echo "Building Flotilla server image ($(ARCH))..."
 	docker buildx build \
-		--platform $(BUILD_PLATFORMS) \
+		--platform $(ARCH) \
 		$(DOCKER_OUTPUT) \
-		$(SERVER_TAGS) \
+		$(SERVER_CACHE_ARGS) \
+		$(foreach tag,$(SERVER_TAGS),--tag $(tag)) \
 		-f Dockerfile \
 		.
 
 docker-build-agent:
-	@echo "Building Flotilla agent image ($(BUILD_PLATFORMS))..."
+	@echo "Building Flotilla agent image ($(ARCH))..."
 	docker buildx build \
-		--platform $(BUILD_PLATFORMS) \
+		--platform $(ARCH) \
 		$(DOCKER_OUTPUT) \
-		$(AGENT_TAGS) \
+		$(AGENT_CACHE_ARGS) \
+		$(foreach tag,$(AGENT_TAGS),--tag $(tag)) \
 		-f deployments/agent/Dockerfile \
 		.
 
 docker-release: docker-build-server docker-build-agent
+
+docker-manifests:
+	@if [ "$(strip $(PUBLISH))" != "true" ]; then \
+		echo "docker-manifests requires PUBLISH=true"; \
+		exit 1; \
+	fi
+	@if [ -z "$(strip $(ARCH_LIST))" ]; then \
+		echo "docker-manifests requires ARCH_LIST to list target platforms (e.g. 'linux/amd64 linux/arm64')"; \
+		exit 1; \
+	fi
+	@echo "Creating multi-architecture manifests..."
+	@for base in $(SERVER_TAGS_BASE); do \
+		repo="$${base%:*}"; \
+		tag="$${base##*:}"; \
+		refs=""; \
+		for arch in $(ARCH_LIST); do \
+			suffix="$${arch##*/}"; \
+			refs="$$refs $${repo}:$${tag}-$$suffix"; \
+		done; \
+		echo "  -> $$base"; \
+		docker buildx imagetools create --tag $$base $$refs; \
+	done
+	@for base in $(AGENT_TAGS_BASE); do \
+		repo="$${base%:*}"; \
+		tag="$${base##*:}"; \
+		refs=""; \
+		for arch in $(ARCH_LIST); do \
+			suffix="$${arch##*/}"; \
+			refs="$$refs $${repo}:$${tag}-$$suffix"; \
+		done; \
+		echo "  -> $$base"; \
+		docker buildx imagetools create --tag $$base $$refs; \
+	done
 
 checksums:
 	@echo "Computing checksums..."
@@ -252,6 +310,8 @@ release-deps:
 	go mod download
 	cd web && npm ci
 
-release: lint test test-frontend package-binaries docker-release checksums
+release-artifacts: lint test test-frontend package-binaries checksums
+
+release: release-artifacts docker-release
 	@echo "Release artifacts available in $(DIST_DIR)"
 

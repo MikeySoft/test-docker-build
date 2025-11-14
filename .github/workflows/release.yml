@@ -15,7 +15,8 @@ env:
   NODE_VERSION: "20.x"
 
 jobs:
-  build-and-publish:
+  artifacts:
+    name: Build release artifacts
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -37,8 +38,37 @@ jobs:
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Install Dependencies
+        run: make release-deps
+
+      - name: Build release artifacts
+        env:
+          RAW_VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${RAW_VERSION#v}" make release-artifacts
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: dist/release/**
+
+  docker-build:
+    name: Build Docker images (${{ matrix.arch }})
+    needs: artifacts
+    strategy:
+      matrix:
+        include:
+          - arch: linux/amd64
+            runner: ubuntu-latest
+          - arch: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -50,21 +80,60 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Dependencies
-        run: make release-deps
-
-      - name: Build and Publish Release Artifacts
+      - name: Build and push image (${{ matrix.arch }})
         env:
-          PUBLISH: "true"
           RAW_VERSION: ${{ github.ref_name }}
         run: |
-          VERSION="${RAW_VERSION#v}" make release
+          VERSION="${RAW_VERSION#v}" \
+          ARCH="${{ matrix.arch }}" \
+          PUBLISH="true" \
+          EDGE_TAG="false" \
+          BUILDKIT_CACHE="true" \
+          CACHE_NAMESPACE="flotilla" \
+          make docker-build-server docker-build-agent
 
-      - name: Upload Release Assets
-        uses: actions/upload-artifact@v4
+  docker-manifests:
+    name: Publish multi-arch manifests
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifests
+        env:
+          RAW_VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${RAW_VERSION#v}" \
+          PUBLISH="true" \
+          EDGE_TAG="false" \
+          ARCH_LIST="linux/amd64 linux/arm64" \
+          make docker-manifests
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - artifacts
+      - docker-manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
         with:
           name: release-artifacts
-          path: dist/release/**
+          path: dist/release
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
