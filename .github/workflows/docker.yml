@@ -62,13 +62,12 @@ jobs:
 
       - name: Build and Push Snapshot Image (${{ matrix.arch }})
         run: |
-          ARCH="${{ matrix.arch }}"
           EDGE_TAG="false"
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
             EDGE_TAG="true"
           fi
           VERSION="sha-${GITHUB_SHA::7}" \
-          ARCH="$ARCH" \
+          ARCH="${{ matrix.arch }}" \
           PUBLISH="true" \
           EDGE_TAG="$EDGE_TAG" \
           BUILDKIT_CACHE="true" \
