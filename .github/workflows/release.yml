@@ -233,8 +233,8 @@ jobs:
 
           The following tags are also available for this release:
           - \`${TAG}\` (specific version)
-          - \`v${VERSION%.*}\` (minor version)
-          - \`v${VERSION%%.*}\` (major version)
+          - \`v${VERSION%.*}\` (minor version)   # ${VERSION%.*} removes the last dot and following part (e.g., 1.2.3 -> 1.2)
+          - \`v${VERSION%%.*}\` (major version)   # ${VERSION%%.*} removes everything after the first dot (e.g., 1.2.3 -> 1)
           - \`latest\` (latest release)
 
           EOF
