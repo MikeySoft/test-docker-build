@@ -5,6 +5,8 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+  repository_dispatch:
+    types: [release-tag]
 
 permissions:
   contents: write
@@ -19,9 +21,28 @@ jobs:
     name: Build release artifacts
     runs-on: ubuntu-latest
     steps:
+      - name: Determine version and ref
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            # Extract tag from repository_dispatch payload
+            TAG="${{ github.event.client_payload.tag }}"
+            VERSION="${TAG#v}"
+            REF="${TAG}"
+          else
+            # Extract from ref_name (push or workflow_dispatch)
+            RAW_VERSION="${{ github.ref_name }}"
+            VERSION="${RAW_VERSION#v}"
+            REF="${{ github.ref }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+          echo "ref=${REF}" >> $GITHUB_OUTPUT
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ steps.version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -43,9 +64,9 @@ jobs:
 
       - name: Build release artifacts
         env:
-          RAW_VERSION: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${RAW_VERSION#v}" make release-artifacts
+          VERSION="${VERSION}" make release-artifacts
 
       - name: Upload release assets
         uses: actions/upload-artifact@v4
@@ -65,9 +86,25 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Determine version and ref
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            TAG="${{ github.event.client_payload.tag }}"
+            VERSION="${TAG#v}"
+            REF="${TAG}"
+          else
+            RAW_VERSION="${{ github.ref_name }}"
+            VERSION="${RAW_VERSION#v}"
+            REF="${{ github.ref }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "ref=${REF}" >> $GITHUB_OUTPUT
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ steps.version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -82,9 +119,9 @@ jobs:
 
       - name: Build and push image (${{ matrix.arch }})
         env:
-          RAW_VERSION: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${RAW_VERSION#v}" \
+          VERSION="${VERSION}" \
           ARCH="${{ matrix.arch }}" \
           PUBLISH="true" \
           EDGE_TAG="false" \
@@ -97,9 +134,25 @@ jobs:
     needs: docker-build
     runs-on: ubuntu-latest
     steps:
+      - name: Determine version and ref
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            TAG="${{ github.event.client_payload.tag }}"
+            VERSION="${TAG#v}"
+            REF="${TAG}"
+          else
+            RAW_VERSION="${{ github.ref_name }}"
+            VERSION="${RAW_VERSION#v}"
+            REF="${{ github.ref }}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "ref=${REF}" >> $GITHUB_OUTPUT
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ steps.version.outputs.ref }}
           fetch-depth: 0
 
       - name: Setup Docker Buildx
@@ -114,9 +167,9 @@ jobs:
 
       - name: Create manifests
         env:
-          RAW_VERSION: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${RAW_VERSION#v}" \
+          VERSION="${VERSION}" \
           PUBLISH="true" \
           EDGE_TAG="false" \
           ARCH_LIST="linux/amd64 linux/arm64" \
@@ -135,9 +188,20 @@ jobs:
           name: release-artifacts
           path: dist/release
 
+      - name: Determine tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            TAG="${{ github.event.client_payload.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: |
             dist/release/*.tar.gz
             dist/release/SHA256SUMS
