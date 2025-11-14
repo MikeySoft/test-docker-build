@@ -158,7 +158,7 @@ jobs:
             -H "Authorization: token ${PAT}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/dispatches" \
-            -d "{\"event_type\":\"release-tag\",\"client_payload\":{\"tag\":\"${TAG}\"}}")
+            -d "$(jq -n --arg tag "$TAG" '{event_type:"release-tag", client_payload:{tag:$tag}}')")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n-1)
