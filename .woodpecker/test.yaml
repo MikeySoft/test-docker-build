@@ -1,0 +1,18 @@
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - manual: true
+  
+steps:
+- name: generate_docker_tags
+    image: ghcr.io/dvjn/woodpecker-docker-tags-plugin
+    settings:
+      tags: |
+        edge
+        pr
+        semver --format {{major}}
+        semver --format {{major}}.{{minor}}
+        semver --format {{version}}
+        cron --format nightly-%Y%m%d
+        sha
